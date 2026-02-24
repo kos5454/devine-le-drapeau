@@ -1,13 +1,12 @@
 "use strict";
 /* ================================================================
-   MODE CARTE — map.js
-   Utilise jsvectormap (carte SVG intégrée, aucun fetch externe)
-   Les codes pays correspondent aux codes ISO 3166-1 alpha-2
-   en MAJUSCULES tels qu'utilisés par jsvectormap/world.js
+   MODE SILHOUETTE — silhouette.js
+   Utilise jsvectormap (carte SVG intégrée)
+   Un pays est mis en évidence en violet ; le joueur choisit
+   son nom parmi 4 propositions.
 ================================================================ */
 
 // ─── PAYS JOUABLES ──────────────────────────────────────────────
-// c = continent : af|am|as|eu|oc
 const COUNTRIES = [
   // Afrique
   {code:"DZ",name:"Algérie",c:"af"},{code:"AO",name:"Angola",c:"af"},
@@ -108,40 +107,34 @@ const CONTINENTS = [
   {id:"oc",  name:"Océanie",      icon:"🏝️"},
 ];
 
-const Q_OPTIONS = [5, 10, 15, 20];
+const Q_OPTIONS  = [5, 10, 15, 20];
+const ACCENT_COL = '#a855f7';   // violet = couleur du mode Silhouette
+const CORRECT_COL = '#22c55e';  // vert   = bonne réponse révélée
+const WRONG_COL   = '#ef4444';  // rouge  = erreur
 
 // ─── ÉTAT ────────────────────────────────────────────────────────
 let state = {
   continent: 'all',
-  mode:      'locate',   // 'locate' | 'silhouette'
-  totalQ: 10,
-  session: [],
-  index: 0,
-  score: 0,
-  correct: 0,
-  answered: false,
-  lastCorrect: null,   // code du pays correct (pour re-highlight au changement de thème)
-  lastWrong:   null,   // code du pays cliqué erronément
+  totalQ:    10,
+  session:   [],
+  index:     0,
+  score:     0,
+  correct:   0,
+  answered:  false,
 };
 
-// ─── INSTANCE CARTE ──────────────────────────────────────────────
 let mapInstance = null;
 
 // ─── THÈME ───────────────────────────────────────────────────────
-function isDark() {
-  return document.documentElement.getAttribute('data-theme') !== 'light';
-}
-function bgColor()     { return isDark() ? '#1e2235' : '#c8d8f0'; }
-function fillColor()   { return isDark() ? '#2a2d3e' : '#dde3f0'; }
-function borderColor() { return isDark() ? '#3d4160' : '#b0bacf'; }
+function isDark()      { return document.documentElement.getAttribute('data-theme') !== 'light'; }
+function bgColor()     { return isDark() ? '#0d1627' : '#c8d8f0'; }
+function fillColor()   { return isDark() ? '#1e2235' : '#d9e2ef'; }
+function borderColor() { return isDark() ? '#2a2d3e' : '#b0bacf'; }
 
 // ─── INIT PAGE ────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  buildModeChips();
   buildContinentChips();
   buildQChips();
-  // La carte est initialisée la première fois que startGame() est appelé
-  // (le conteneur doit être visible pour que jsvectormap calcule les dimensions)
 });
 
 function buildContinentChips() {
@@ -174,59 +167,38 @@ function buildQChips() {
   });
 }
 
-function buildModeChips() {
-  const container = document.getElementById('mode-chips');
-  const MODES = [
-    { id: 'locate',     label: '🗺️ Localiser',   title: 'Cliquez le pays sur la carte' },
-    { id: 'silhouette', label: '🔍 Silhouette',   title: 'Devinez le pays d\'après sa forme' },
-  ];
-  MODES.forEach(m => {
-    const btn = document.createElement('button');
-    btn.className = 'chip' + (m.id === state.mode ? ' on' : '');
-    btn.textContent = m.label;
-    btn.title = m.title;
-    btn.onclick = () => {
-      state.mode = m.id;
-      container.querySelectorAll('.chip').forEach(b => b.classList.remove('on'));
-      btn.classList.add('on');
-    };
-    container.appendChild(btn);
-  });
-}
-
 // ─── INIT CARTE ───────────────────────────────────────────────────
 function initMap() {
   mapInstance = new jsVectorMap({
-    selector: '#map',
-    map: 'world',
+    selector:        '#map',
+    map:             'world',
     backgroundColor: bgColor(),
-    zoomButtons: true,
-    zoomOnScroll: true,
-    zoomMax: 24,          // défaut ≈ 8, on monte à 24 pour + de zoom sur mobile
-    zoomStep: 1.5,        // chaque clic +/− zoome de 50 %
-    selectable: false,
+    zoomButtons:     true,
+    zoomOnScroll:    true,
+    zoomMax:         24,
+    zoomStep:        1.5,
+    selectable:      false,
     regionStyle: {
-      initial:  { fill: fillColor(), stroke: borderColor(), strokeWidth: 0.5, fillOpacity: 1 },
-      hover:    { fill: '#6c63ff', cursor: 'pointer', fillOpacity: 0.85 },
+      initial: {
+        fill:        fillColor(),
+        stroke:      borderColor(),
+        strokeWidth: 0.4,
+        fillOpacity: 1,
+      },
+      hover: {
+        fill: fillColor(),
+        cursor: 'default',
+      },
     },
-  });
-
-  // Clic : on écoute directement sur le SVG, data-code est posé par jsvectormap
-  document.getElementById('map').addEventListener('click', (e) => {
-    const el = e.target.closest('[data-code]');
-    if (!el) return;
-    handleClick(el.getAttribute('data-code'));
   });
 }
 
 // ─── COULEURS DIRECTEMENT SUR LE SVG ─────────────────────────────
-// On utilise setAttribute('fill') et PAS style.fill
-// → le hover de jsvectormap (qui passe par style) peut prendre le dessus
 function setRegionFill(code, color) {
   const el = document.querySelector(`#map [data-code="${code}"]`);
   if (el) {
     el.setAttribute('fill', color);
-    el.style.fill = '';  // effacer tout override inline
+    el.style.fill = '';
   }
 }
 
@@ -238,36 +210,47 @@ function resetAllColors() {
     el.setAttribute('stroke', bc);
     el.style.fill   = '';
     el.style.stroke = '';
-    el.classList.remove('sil-target', 'sil-correct', 'loc-correct', 'loc-wrong');
   });
 }
 
-// ─── HIGHLIGHT PERSISTANT LOCALISER ───────────────────────────────────
-function setLocCorrect(code) {
-  const el = document.querySelector(`#map [data-code="${code}"]`);
-  if (el) { el.classList.add('loc-correct'); el.style.fill = ''; }
-}
-function setLocWrong(code) {
-  const el = document.querySelector(`#map [data-code="${code}"]`);
-  if (el) { el.classList.add('loc-wrong'); el.style.fill = ''; }
-}
+// Zoom léger sur la zone du pays cible
+function focusOnCountry(code) {
+  if (!mapInstance) return;
+  try {
+    // jsvectormap 1.5.3 expose setFocus
+    if (typeof mapInstance.setFocus === 'function') {
+      mapInstance.setFocus({ region: code, animate: false });
+      return;
+    }
+  } catch(e) { /* pas disponible — on reste sur la vue mondiale */ }
 
-// ─── HIGHLIGHT PERSISTANT SILHOUETTE ─────────────────────────────────
-function setTargetHighlight(code) {
-  const el = document.querySelector(`#map [data-code="${code}"]`);
-  if (el) {
-    el.classList.remove('sil-correct');
-    el.classList.add('sil-target');
-    el.style.fill = '';
-  }
-}
-function resolveTargetCorrect(code) {
-  const el = document.querySelector(`#map [data-code="${code}"]`);
-  if (el) {
-    el.classList.remove('sil-target');
-    el.classList.add('sil-correct');
-    el.style.fill = '';
-  }
+  // Fallback : centrer via la bounding box SVG du chemin
+  try {
+    const path = document.querySelector(`#map [data-code="${code}"]`);
+    if (!path) return;
+    const bb   = path.getBBox();
+    const svg  = document.querySelector('#map svg');
+    if (!svg) return;
+    const vb   = svg.viewBox.baseVal;
+    if (!vb || !vb.width) return;
+
+    // Centre du pays dans l'espace SVG
+    const cx = bb.x + bb.width  / 2;
+    const cy = bb.y + bb.height / 2;
+
+    // Facteur de zoom : plus le pays est petit, plus on zoome
+    const maxDim = Math.max(bb.width, bb.height);
+    const scale  = Math.min(6, Math.max(1.5, vb.width / (maxDim * 3)));
+
+    // Translateion pour centrer
+    const mapW = svg.clientWidth  || svg.getBoundingClientRect().width;
+    const mapH = svg.clientHeight || svg.getBoundingClientRect().height;
+    const tx   = mapW / 2 - cx * scale;
+    const ty   = mapH / 2 - cy * scale;
+
+    const g = svg.querySelector('g');
+    if (g) g.setAttribute('transform', `translate(${tx},${ty}) scale(${scale})`);
+  } catch(e) { /* fallback silencieux */ }
 }
 
 // ─── THÈME CHANGE ─────────────────────────────────────────────────
@@ -276,25 +259,15 @@ function applyThemeToMap() {
   const svg = document.querySelector('#map svg');
   if (svg) svg.style.background = bgColor();
   resetAllColors();
+  // Re-mettre en violet le pays actuel si une question est en cours
   if (isGameActive() && state.session.length) {
     const country = state.session[state.index];
-    if (!country) return;
-    if (state.mode === 'silhouette') {
-      if (state.answered) resolveTargetCorrect(country.code);
-      else                setTargetHighlight(country.code);
-    } else {
-      // mode locate : re-appliquer les classes persistantes
-      if (state.lastCorrect) setLocCorrect(state.lastCorrect);
-      if (state.lastWrong)   setLocWrong(state.lastWrong);
-    }
+    if (country) setRegionFill(country.code, state.answered ? CORRECT_COL : ACCENT_COL);
   }
 }
 
-// MutationObserver = plus fiable que l'événement custom themechange
 new MutationObserver(() => applyThemeToMap())
   .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-
-// Garde aussi l'event custom au cas où
 window.addEventListener('themechange', applyThemeToMap);
 
 function isGameActive() {
@@ -317,8 +290,8 @@ window.startGame = function () {
     ? [...COUNTRIES]
     : COUNTRIES.filter(c => c.c === state.continent);
 
-  if (pool.length < (state.mode === 'silhouette' ? 4 : 1)) {
-    alert('Pas assez de pays disponibles pour cette région.');
+  if (pool.length < 4) {
+    alert('Pas assez de pays dans cette région (minimum 4).');
     return;
   }
 
@@ -331,17 +304,7 @@ window.startGame = function () {
   document.getElementById('screen-result').classList.add('hidden');
   document.getElementById('game-screen').classList.remove('hidden');
   document.getElementById('topbar').classList.remove('hidden');
-
-  // Afficher / cacher le panel réponses selon le mode
-  const panel = document.getElementById('answer-panel');
-  const isSil = state.mode === 'silhouette';
-  panel.style.display = isSil ? 'block' : 'none';
-  // Ajuster le bas de la carte pour laisser la place au panel
-  document.getElementById('game-screen').style.bottom = isSil ? '185px' : '0';
-
-  hideFeedback();
-  document.getElementById('btn-next').style.display     = 'none';
-  document.getElementById('btn-next-sil').style.display = 'none';
+  document.getElementById('btn-next').style.display = 'none';
 
   if (!mapInstance) {
     initMap();
@@ -354,66 +317,82 @@ window.startGame = function () {
 
 // ─── QUESTION ─────────────────────────────────────────────────────
 function askQuestion() {
-  state.answered    = false;
-  state.lastCorrect = null;
-  state.lastWrong   = null;
+  state.answered = false;
+
   const country = state.session[state.index];
 
   document.getElementById('tb-count').textContent = `${state.index + 1} / ${state.session.length}`;
   document.getElementById('tb-score').textContent = `${state.score} pts`;
   document.getElementById('pbar').style.width     = `${(state.index / state.session.length) * 100}%`;
+  document.getElementById('tb-q').textContent     = 'De quel pays s\'agit-il ?';
+  document.getElementById('btn-next').style.display = 'none';
 
-  hideFeedback();
-  document.getElementById('btn-next').style.display     = 'none';
-  document.getElementById('btn-next-sil').style.display = 'none';
   resetAllColors();
+  setRegionFill(country.code, ACCENT_COL);
 
-  if (state.mode === 'silhouette') {
-    document.getElementById('tb-q').textContent = 'De quel pays s\'agit-il ?';
-    setTargetHighlight(country.code);
-    renderAnswerButtons(country);
-  } else {
-    document.getElementById('tb-q').textContent = `🔍 Où est ${country.name} ?`;
-    zoomContinent(country.c);
-  }
+  focusOnCountry(country.code);
+  renderAnswerButtons(country);
 }
 
-// ─── CLIC SUR LA CARTE ────────────────────────────────────────────
-function handleClick(clickedCode) {
-  // En mode silhouette, les clics sur la carte sont ignorés
-  if (state.mode === 'silhouette') return;
-  if (!isGameActive() || state.answered) return;
-  if (!clickedCode) return;
+// ─── GÉNÉRATION DES 4 BOUTONS ─────────────────────────────────────
+function renderAnswerButtons(correct) {
+  const grid = document.getElementById('answer-grid');
+  grid.innerHTML = '';
 
+  // 3 mauvaises réponses : même continent si possible, sinon random
+  const sameContinent = COUNTRIES.filter(c => c.code !== correct.code && c.c === correct.c);
+  const others        = COUNTRIES.filter(c => c.code !== correct.code && c.c !== correct.c);
+
+  let wrongPool = sameContinent.length >= 3 ? sameContinent : [...sameContinent, ...others];
+  const wrong   = shuffle(wrongPool).slice(0, 3);
+
+  const choices = shuffle([correct, ...wrong]);
+
+  choices.forEach(country => {
+    const btn = document.createElement('button');
+    btn.className         = 'ans-btn';
+    btn.textContent       = country.name;
+    btn.dataset.code      = country.code;
+    btn.addEventListener('click', () => handleAnswer(country.code, correct.code));
+    grid.appendChild(btn);
+  });
+}
+
+// ─── RÉPONSE ──────────────────────────────────────────────────────
+function handleAnswer(clicked, correctCode) {
+  if (state.answered) return;
   state.answered = true;
-  const country  = state.session[state.index];
-  const correct  = (clickedCode === country.code);
 
-  if (correct) {
-    state.score   += 1;
-    state.correct += 1;
-    state.lastCorrect = country.code;
-    state.lastWrong   = null;
-    setLocCorrect(country.code);
-    showFeedback(true,  '✅ Bonne réponse !', '');
+  const isCorrect = clicked === correctCode;
+
+  if (isCorrect) {
+    state.score++;
+    state.correct++;
+    setRegionFill(correctCode, CORRECT_COL);
   } else {
-    state.lastCorrect = country.code;
-    state.lastWrong   = clickedCode;
-    setLocCorrect(country.code);          // correct en vert
-    setLocWrong(clickedCode);             // cliqué en rouge
-    const clickedName = COUNTRIES.find(c => c.code === clickedCode)?.name || clickedCode;
-    showFeedback(false, '❌ Raté !', `C'était ${country.name}. Tu as cliqué : ${clickedName}`);
+    setRegionFill(correctCode, CORRECT_COL);
+    setRegionFill(clicked,     WRONG_COL);
   }
 
   document.getElementById('tb-score').textContent = `${state.score} pts`;
 
-  // Dernier → bouton "Voir résultat", sinon "Suivant"
+  // Colorier les boutons
+  document.querySelectorAll('.ans-btn').forEach(btn => {
+    btn.disabled = true;
+    if (btn.dataset.code === correctCode) {
+      btn.classList.add('correct');
+    } else if (btn.dataset.code === clicked && !isCorrect) {
+      btn.classList.add('wrong');
+    }
+  });
+
+  // Bouton suivant
   const btnNext = document.getElementById('btn-next');
-  btnNext.textContent = (state.index + 1 >= state.session.length) ? 'Voir le résultat 🏆' : 'Question suivante →';
+  btnNext.textContent   = (state.index + 1 >= state.session.length) ? 'Voir le résultat 🏆' : 'Question suivante →';
   btnNext.style.display = 'block';
 }
 
-// ─── SUIVANT / FIN ────────────────────────────────────────────────
+// ─── SUIVANT ─────────────────────────────────────────────────────
 window.nextQuestion = function () {
   state.index++;
   if (state.index >= state.session.length) {
@@ -427,10 +406,6 @@ window.nextQuestion = function () {
 function showResult() {
   document.getElementById('game-screen').classList.add('hidden');
   document.getElementById('topbar').classList.add('hidden');
-  document.getElementById('btn-next').style.display     = 'none';
-  document.getElementById('btn-next-sil').style.display = 'none';
-  document.getElementById('answer-panel').style.display = 'none';
-  hideFeedback();
 
   const total = state.session.length;
   const pct   = Math.round((state.correct / total) * 100);
@@ -439,7 +414,7 @@ function showResult() {
   document.getElementById('res-correct').textContent = state.correct;
   document.getElementById('res-total').textContent   = total;
   document.getElementById('res-emoji').textContent   = pct >= 80 ? '🏆' : pct >= 50 ? '👍' : '😅';
-  document.getElementById('res-detail').textContent  = `${pct}% de réussite`;
+  document.getElementById('res-detail').textContent  = `${pct} % de réussite`;
 
   document.getElementById('screen-result').classList.remove('hidden');
 }
@@ -449,83 +424,7 @@ window.goHome = function () {
   document.getElementById('game-screen').classList.add('hidden');
   document.getElementById('topbar').classList.add('hidden');
   document.getElementById('screen-result').classList.add('hidden');
-  document.getElementById('btn-next').style.display     = 'none';
-  document.getElementById('btn-next-sil').style.display = 'none';
-  document.getElementById('answer-panel').style.display = 'none';
-  hideFeedback();
+  document.getElementById('btn-next').style.display = 'none';
   resetAllColors();
   document.getElementById('screen-home').classList.remove('hidden');
 };
-
-// ─── FEEDBACK ─────────────────────────────────────────────────────
-function showFeedback(ok, msg, hint) {
-  const el = document.getElementById('feedback');
-  el.className = ok ? 'feedback ok' : 'feedback bad';    // classe définie dans le CSS inline
-  document.getElementById('fb-msg').textContent  = msg;
-  document.getElementById('fb-hint').textContent = hint;
-  el.style.display = 'block';
-}
-function hideFeedback() {
-  const el = document.getElementById('feedback');
-  if (el) el.style.display = 'none';
-}
-
-// ─── SILHOUETTE : BOUTONS RÉPONSES ──────────────────────────────────
-function renderAnswerButtons(correct) {
-  const grid = document.getElementById('answer-grid');
-  grid.innerHTML = '';
-
-  const pool = (state.continent === 'all' ? COUNTRIES : COUNTRIES.filter(c => c.c === state.continent))
-    .filter(c => c.code !== correct.code);
-  const fallback = COUNTRIES.filter(c => c.code !== correct.code);
-  const wrongPool = pool.length >= 3 ? pool : fallback;
-  const wrong = shuffle(wrongPool).slice(0, 3);
-
-  shuffle([correct, ...wrong]).forEach(country => {
-    const btn = document.createElement('button');
-    btn.className    = 'ans-btn';
-    btn.textContent  = country.name;
-    btn.dataset.code = country.code;
-    btn.addEventListener('click', () => handleSilhouetteAnswer(country.code, correct.code));
-    grid.appendChild(btn);
-  });
-}
-
-function handleSilhouetteAnswer(clicked, correctCode) {
-  if (state.answered) return;
-  state.answered = true;
-
-  const isCorrect = clicked === correctCode;
-  if (isCorrect) { state.score++; state.correct++; }
-
-  document.getElementById('tb-score').textContent = `${state.score} pts`;
-
-  // Highlight carte
-  resolveTargetCorrect(correctCode);
-  if (!isCorrect) setRegionFill(clicked, '#ef4444');
-
-  // Colorier les boutons
-  document.querySelectorAll('.ans-btn').forEach(btn => {
-    btn.disabled = true;
-    if (btn.dataset.code === correctCode)             btn.classList.add('correct');
-    else if (btn.dataset.code === clicked && !isCorrect) btn.classList.add('wrong');
-  });
-
-  const btnSil = document.getElementById('btn-next-sil');
-  btnSil.textContent   = (state.index + 1 >= state.session.length) ? 'Voir le résultat 🏆' : 'Question suivante →';
-  btnSil.style.display = 'block';
-}
-
-// ─── ZOOM CONTINENT ───────────────────────────────────────────────
-function zoomContinent(c) {
-  if (!mapInstance) return;
-  const VIEWS = {
-    af: { scale: 2.8, x: 520, y: 340 },
-    am: { scale: 1.8, x: 220, y: 300 },
-    as: { scale: 2.2, x: 750, y: 270 },
-    eu: { scale: 4.5, x: 510, y: 170 },
-    oc: { scale: 3.0, x: 850, y: 420 },
-  };
-  // jsvectormap ne fournit pas setScale public simple,
-  // on let the user navigate manually — only reset on home
-}
